@@ -12,9 +12,13 @@ version = "0.1.0"
 authors = ["Paul Colomiets <paul@colomiets.name>"]
 
 [dependencies]
-nginx-config = "0.2.0"
+env_logger = "0.5.6"
+nginx-config = "0.2.2"
 failure = "0.1.1"
 structopt = "0.2.5"
+
+[dev-dependencies]
+assert_cli = "0.5.4"
 
 [[bin]]
 name = "nginx-config-mod"

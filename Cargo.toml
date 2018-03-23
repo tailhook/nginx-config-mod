@@ -1,0 +1,22 @@
+[package]
+name = "nginx-config-mod"
+description = """
+    A graphql command-line tool
+"""
+license = "MIT/Apache-2.0"
+readme = "README.md"
+keywords = ["command-line", "nginx", "config", "rewrite", "modify"]
+categories = ["command-line-utilities"]
+homepage = "http://github.com/tailhook/nginx-config-mod"
+version = "0.1.0"
+authors = ["Paul Colomiets <paul@colomiets.name>"]
+
+[dependencies]
+nginx-config = "0.2.0"
+failure = "0.1.1"
+structopt = "0.2.5"
+
+[[bin]]
+name = "nginx-config-mod"
+path = "src/bin/nginx_config_mod/main.rs"
+doc = false

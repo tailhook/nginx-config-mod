@@ -5,4 +5,4 @@ mod config;
 mod errors;
 
 pub use errors::ReadError;
-pub use config::Config;
+pub use config::{Config, EntryPoint};

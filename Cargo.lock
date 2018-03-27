@@ -263,6 +263,11 @@ dependencies = [
 ]
 
 [[package]]
+name = "matches"
+version = "0.1.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[package]]
 name = "memchr"
 version = "2.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -272,11 +277,12 @@ dependencies = [
 
 [[package]]
 name = "nginx-config"
-version = "0.2.2"
+version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 dependencies = [
  "combine 3.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "failure 0.1.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "matches 0.1.6 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
 [[package]]
@@ -286,7 +292,8 @@ dependencies = [
  "assert_cli 0.5.4 (registry+https://github.com/rust-lang/crates.io-index)",
  "env_logger 0.5.6 (registry+https://github.com/rust-lang/crates.io-index)",
  "failure 0.1.1 (registry+https://github.com/rust-lang/crates.io-index)",
- "nginx-config 0.2.2 (registry+https://github.com/rust-lang/crates.io-index)",
+ "log 0.4.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "nginx-config 0.3.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "structopt 0.2.5 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
@@ -690,8 +697,9 @@ dependencies = [
 "checksum lazy_static 1.0.0 (registry+https://github.com/rust-lang/crates.io-index)" = "c8f31047daa365f19be14b47c29df4f7c3b581832407daabe6ae77397619237d"
 "checksum libc 0.2.39 (registry+https://github.com/rust-lang/crates.io-index)" = "f54263ad99207254cf58b5f701ecb432c717445ea2ee8af387334bdd1a03fdff"
 "checksum log 0.4.1 (registry+https://github.com/rust-lang/crates.io-index)" = "89f010e843f2b1a31dbd316b3b8d443758bc634bed37aabade59c686d644e0a2"
+"checksum matches 0.1.6 (registry+https://github.com/rust-lang/crates.io-index)" = "100aabe6b8ff4e4a7e32c1c13523379802df0772b82466207ac25b013f193376"
 "checksum memchr 2.0.1 (registry+https://github.com/rust-lang/crates.io-index)" = "796fba70e76612589ed2ce7f45282f5af869e0fdd7cc6199fa1aa1f1d591ba9d"
-"checksum nginx-config 0.2.2 (registry+https://github.com/rust-lang/crates.io-index)" = "fb56dc395a963fb1f357e398eca521bf915ffc7fa49b19a05bfed38d7f82c921"
+"checksum nginx-config 0.3.0 (registry+https://github.com/rust-lang/crates.io-index)" = "a4b1a77dec44e0aa817fb86058edfb4a937b33ab3462e0b985e5dbdab222de54"
 "checksum num-traits 0.2.2 (registry+https://github.com/rust-lang/crates.io-index)" = "dee092fcdf725aee04dd7da1d21debff559237d49ef1cb3e69bcb8ece44c7364"
 "checksum proc-macro2 0.2.3 (registry+https://github.com/rust-lang/crates.io-index)" = "cd07deb3c6d1d9ff827999c7f9b04cdfd66b1b17ae508e14fe47b620f2282ae0"
 "checksum pulldown-cmark 0.1.2 (registry+https://github.com/rust-lang/crates.io-index)" = "d6fdf85cda6cadfae5428a54661d431330b312bc767ddbc57adbedc24da66e32"

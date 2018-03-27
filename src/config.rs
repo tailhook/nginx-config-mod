@@ -1,4 +1,5 @@
 use std::io::Read;
+use std::fmt;
 use std::path::{PathBuf, Path};
 use std::fs::File;
 
@@ -54,5 +55,24 @@ impl Config {
             filename: Some(path.to_path_buf()),
             ast,
         })
+    }
+}
+
+impl fmt::Display for Config {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        use self::Ast::*;
+        match self.ast {
+            Main(ref ast) => write!(f, "{}", ast),
+            Http(ref dirs) | Server(ref dirs) | Location(ref dirs)
+            => {
+                if dirs.len() > 0 {
+                    write!(f, "{}", &dirs[0])?;
+                    for d in &dirs[1..] {
+                        write!(f, "\n{}", d)?;
+                    }
+                }
+                Ok(())
+            }
+        }
     }
 }

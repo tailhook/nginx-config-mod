@@ -1,0 +1,56 @@
+language: rust
+rust: stable
+os: linux
+dist: trusty
+sudo: false
+addons:
+  apt:
+    packages:
+    - fakeroot
+    - musl-tools
+
+cache:
+- apt
+- cargo
+
+before_cache:
+- rm -r $TRAVIS_BUILD_DIR/target/debug
+
+script:
+- cargo build $CARGO_ARGS
+- cargo test $CARGO_ARGS
+
+jobs:
+  include:
+  - rust: stable
+  - rust: beta
+  - rust: nightly
+
+  # deploy
+  - stage: publish
+    env:
+    # CARGO_TOKEN
+    - secure: "WIwIepr7TV/B6m1OblMePosh1EKg6VGzQHpO7abENUM3kNy0gcHZTiEUqoxbXlsflQ29NwwpSebvVs8Vm+cN0v08/+hTUcNTYzXVR59/hEb6vYhF98oSbb9hnYKMzSP9vc7zAaA8ahmaSbuoAO9QYVju31yqGNVa9P+QDR7h+ro4u2+PjpseEPcistdHSmy7CmAiMuRFLBWOEOfEen8+k8wgCJ2uAnhkH5On9gMJQTZiF50ksOG0fL5rBwrUpZu2n455eQIrQViQWP2VXX46hUiRlqMOqP4Ab1S0qpoYzO5bkGfj5MMrmOfs/IfsQ7Ji521m1RU0L8yvyqwZxBuvezMICC0MS6ODH0LxOdP3AMk8nR+VWH5eTGILW6BgN81fHd5g7G4wEO9XU1rolqasdL/15y/FgTM2TZPd9n0fD2ufaDpXydKEu8qkzw5Cx329vEqIU05pgB3qYzJi6u/tAIJmvwN52C0e3lJNdmWTvDRKJV+aE76CzEYYxylj3FqoQWnGsXoF0javOm65wR5K5iDoflV4cADRFf1YugLblnLNHgF0IKGiHKwqM8ZwNb6rNY4IyJ5T6jamMHC3VGF3uj1HeMq+qA2w94GDlST00NAwsHPhcRpTRxMUXWN9Cwyi/AxiFpPuC6NNIxPfjXfFctLLwaq9L4FLnT5uRz2wpiA="
+    install: true
+
+    before_deploy: |
+      mkdir -p dist
+      rustup target add x86_64-unknown-linux-musl
+      cargo build --target=x86_64-unknown-linux-musl --release
+      fakeroot sh -ecx '
+        install -D target/x86_64-unknown-linux-musl/release/nginx-config-mod pkg/usr/bin/nginx-config-mod
+        tar -C pkg -czf dist/nginx-config-mod-$TRAVIS_TAG.tar.gz usr
+      '
+
+    deploy:
+    - provider: script
+      script: 'cargo publish --verbose --token=$CARGO_TOKEN'
+      on:
+        tags: true
+    - provider: releases
+      api_key:
+        secure: "RPiFH46vFTET8WXTuNPzu94CIFaShLJjgCChlPUimldSGDhCt8ZJu0nxjChTbEUKcRJQRWGVJQC9Jvo/tue//h0XgFp0cHZFLmDdW5vj+FUAkc2PmqPRwGoI79hf1lxq9MbUSXfNoAh4FDlj+QwspgkE7DmXmFAKTLWs9FOAMu6Z44V9yqvKFFdZY4QZNVDFGvfHcfijgQu1f7K8JTefFhwaSbzrf7vgJwflLXKM6MuLd9WpdM/bv31Hd7CUsWEmHa6JVCH/enZEMp6BZ6E/xeyH05ChwN2SiMVNFUP9pGdCnVnxFI5U9dAwcE2dww9PYv+D5hdVKQ82zURfRIMjpDFpQRAeyExPjJi20eUfO10cnVOcKCn9DF9+irFxndQGIA4mesFBfhCLVzzph+Qete6Ifm6JwXXODDmrY/XOg9eh7KW7zo3qTq2/Pr8Texgj8boX2mVuKEqdOoBlwbQU5WFW/8sc5Y+OUlnrIul0pfHfQbxvJTYVsbMdR4kEqWaztfW3OFPuIAzefER49OhpCr5rUDhW9gq25EgAMyV2tLSOK768OiimlK1bQPvk1UEKQLZmqITdExK0VJrbpcyuO6nYRk62T/bmqyGCEb6KoUET78uWQaxEZ7oWPJdXC6NRkSpa21ddB23YD12sXoUCJCM2qedU/shMGUdQE++hYjs="
+      file: "dist/nginx-config-mod-$TRAVIS_TAG.tar.gz"
+      skip_cleanup: true
+      on:
+        tags: true

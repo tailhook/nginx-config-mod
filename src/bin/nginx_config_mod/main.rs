@@ -1,16 +1,21 @@
 extern crate env_logger;
+extern crate nginx_config;
 extern crate nginx_config_mod;
 #[macro_use] extern crate failure;
 #[macro_use] extern crate log;
 #[macro_use] extern crate structopt;
+
+mod modify;
 
 use std::path::PathBuf;
 use std::process::exit;
 
 use failure::Error;
 use structopt::StructOpt;
-
 use nginx_config_mod::{Config, EntryPoint};
+
+use modify::Modify;
+
 
 #[derive(StructOpt)]
 #[structopt(name = "nginx-config-mod",
@@ -27,6 +32,9 @@ enum Options {
         #[structopt(parse(from_os_str))]
         file: PathBuf,
     },
+    #[structopt(name="modify",
+                about="Apply various modifications to config")]
+    Modify(Modify),
 }
 
 fn run(opt: Options) -> Result<(), Error> {
@@ -38,6 +46,9 @@ fn run(opt: Options) -> Result<(), Error> {
         Format { file } => {
             let cfg = Config::partial_file(EntryPoint::Main, &file)?;
             print!("{}", cfg);
+        }
+        Modify(modify) => {
+            modify::run(modify)?
         }
     }
     Ok(())

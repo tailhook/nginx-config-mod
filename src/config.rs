@@ -56,6 +56,22 @@ impl Config {
             ast,
         })
     }
+
+    pub fn directives(&self) -> &[Directive] {
+        use self::Ast::*;
+        match self.ast {
+            Main(ref ast) => &ast.directives,
+            Http(ref dirs) | Server(ref dirs) | Location(ref dirs) => dirs,
+        }
+    }
+    pub fn directives_mut(&mut self) -> &mut Vec<Directive> {
+        use self::Ast::*;
+        match self.ast {
+            Main(ref mut ast) => &mut ast.directives,
+            Http(ref mut dirs) | Server(ref mut dirs) | Location(ref mut dirs)
+            => dirs,
+        }
+    }
 }
 
 impl fmt::Display for Config {

@@ -3,7 +3,7 @@ use std::path::PathBuf;
 
 use nginx_config_mod::{Config, EntryPoint};
 use nginx_config::parse_directives;
-use nginx_config::ast::{self, Listen};
+use nginx_config::ast::{self, Listen, Value};
 use nginx_config::visitors::{replace_vars, visit_mutable};
 
 use failure::Error;
@@ -22,6 +22,11 @@ pub struct Modify {
                 help="replace orig.domain and all names starting with it \
                       to a dest.domain (keeping prefix if needed)")]
     server_name_mapping: Vec<String>,
+
+    #[structopt(long="subst-proxy-pass-host", name="orig.host=dest.host",
+                help="replace orig.host and all names starting with it \
+                      to a dest.host (keeping prefix and port)")]
+    proxy_pass_mapping: Vec<String>,
 
     #[structopt(long="listen", name="LISTEN",
                 help="replace all listen directives to this value",
@@ -42,12 +47,62 @@ fn parse_listen(s: &str) -> Result<Listen, Error> {
     }
 }
 
+// TODO(tailhook) temporary, until we expose Value::parse
+fn parse_proxy(s: &str) -> Result<Value, Error> {
+    let text = format!("proxy_pass {};", s);
+    let mut dirs = parse_directives(&text)?;
+    if dirs.len() > 1 {
+        bail!("Only single proxy_pass directive may be specified \
+               (consider removing semicolon from argument)");
+    }
+    match dirs.pop().map(|d| d.item) {
+        Some(ast::Item::ProxyPass(value)) => Ok(value),
+        _ => bail!("Internal error when parsing proxy_pass directive"),
+    }
+}
+
 fn relative<'x>(name: &'x str, anchor: &str) -> Option<&'x str> {
     if name.ends_with(anchor) {
         if anchor.len() == name.len() {
             return Some("");
         } else if name[..name.len() - anchor.len()].ends_with(".") {
             return Some(&name[..name.len() - anchor.len()])
+        } else {
+            return None
+        }
+    } else {
+        None
+    }
+}
+
+fn proxy_subst<'x>(name: &'x str, anchor: &str) -> Option<(&'x str, &'x str)> {
+    let mut cur = name;
+    let mut prefix = 0;
+    let mut suffix = 0;
+    if name.starts_with("http://") {
+        cur = &cur["http://".len()..];
+        prefix += "http://".len();
+    } else if name.starts_with("https://") {
+        cur = &cur["https://".len()..];
+        prefix += "https://".len();
+    } else {
+        return None;
+    }
+    if let Some(suf) = cur.find('/') {
+        suffix += cur.len() - suf;
+        cur = &cur[..suf];
+    }
+    if let Some(suf) = cur.find(':') {
+        suffix += cur.len() - suf;
+        cur = &cur[..suf];
+    }
+    if cur.ends_with(anchor) {
+        // TODO(tailhook) check for variables ?
+        if anchor.len() == cur.len() {
+            return Some((&name[..prefix], &name[name.len() - suffix..]));
+        } else if cur[..cur.len() - anchor.len()].ends_with(".") {
+            prefix += cur.len() - anchor.len();
+            return Some((&name[..prefix], &name[name.len() - suffix..]));
         } else {
             return None
         }
@@ -117,6 +172,44 @@ pub fn run(modify: Modify) -> Result<(), Error> {
                 _ => {}
             }
         });
+    }
+
+    // proxy pass
+    if modify.proxy_pass_mapping.len() > 0 {
+        let mut pnames = HashMap::new();
+        for item in &modify.proxy_pass_mapping {
+            let mut pair = item.splitn(2, '=');
+            let orig = pair.next().expect("first item always exists");
+            if let Some(dest) = pair.next() {
+                pnames.insert(orig, dest);
+            } else {
+                bail!("proxy pass host {:?} doesn't include substitution \
+                    target (format is `orig.host=dest.example.org`)");
+            }
+        }
+        let mut err = None;
+        visit_mutable(cfg.directives_mut(), |dir| {
+            match dir.item {
+                ast::Item::ProxyPass(ref mut value) => {
+                    let mut s = value.to_string();
+                    for (orig, new) in &pnames {
+                        s = if let Some((pre, suf)) = proxy_subst(&s, orig) {
+                            format!("{}{}{}", pre, new, suf)
+                        } else {
+                            continue;
+                        }
+                    }
+                    match parse_proxy(&s) {
+                        Ok(x) => *value = x,
+                        Err(e) => err = Some(e),
+                    }
+                }
+                _ => {}
+            }
+        });
+        if let Some(e) = err {
+            return Err(e);
+        }
     }
 
     print!("{}", cfg);

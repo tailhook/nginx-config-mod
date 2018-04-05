@@ -1,5 +1,70 @@
 minimum-bulk: v0.4.5
 
+metadata:
+  name: nginx-config-mod
+  short-description: Nginx config validation and modification tool
+  long-description: |
+    Nginx config validation and modification tool
+
+repositories:
+
+# trusty
+- kind: debian
+  suite: trusty
+  component: nginx-config-mod
+  keep-releases: 1
+  match-version: ^\d+\.\d+\.\d+\+trusty1$
+
+- kind: debian
+  suite: trusty
+  component: nginx-config-mod-stable
+  keep-releases: 1000
+  match-version: ^\d+\.\d+\.\d+\+trusty1$
+
+- kind: debian
+  suite: trusty
+  component: nginx-config-mod-testing
+  keep-releases: 100
+  match-version: \+trusty1$
+
+# xenial
+- kind: debian
+  suite: xenial
+  component: nginx-config-mod
+  keep-releases: 1
+  match-version: ^\d+\.\d+\.\d+\+xenial1$
+
+- kind: debian
+  suite: xenial
+  component: nginx-config-mod-stable
+  keep-releases: 1000
+  match-version: ^\d+\.\d+\.\d+\+xenial1$
+
+- kind: debian
+  suite: xenial
+  component: nginx-config-mod-testing
+  keep-releases: 100
+  match-version: \+xenial1$
+
+# bionic
+- kind: debian
+  suite: bionic
+  component: nginx-config-mod
+  keep-releases: 1
+  match-version: ^\d+\.\d+\.\d+\+bionic1$
+
+- kind: debian
+  suite: bionic
+  component: nginx-config-mod-stable
+  keep-releases: 1000
+  match-version: ^\d+\.\d+\.\d+\+bionic1$
+
+- kind: debian
+  suite: bionic
+  component: nginx-config-mod-testing
+  keep-releases: 100
+  match-version: \+bionic1$
+
 versions:
 
 - file: Cargo.toml

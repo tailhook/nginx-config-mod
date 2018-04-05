@@ -2,48 +2,103 @@ commands:
 
   run: !Command
     description: Run command-line tool
-    container: ubuntu
+    container: bionic
     prerequisites: [make]
     run: [./target/debug/nginx-config-mod]
 
   cargo: !Command
     description: Run any cargo command
-    container: ubuntu
+    container: bionic
     symlink-name: cargo
     run: [cargo]
 
   make: !Command
     description: Build the library
-    container: ubuntu
+    container: bionic
     run: [cargo, build]
 
   test: !Command
     description: Test the library
-    container: ubuntu
+    container: bionic
     environ: { RUST_BACKTRACE: 1 }
     run: [cargo, test]
 
   _bulk: !Command
     description: Run `bulk` command (for version bookkeeping)
-    container: ubuntu
+    container: bionic
     run: [bulk]
+
+  _package-trusty: !Command
+    container: trusty
+    run: &package |
+      set -e
+      version=$(git describe --dirty)
+      codename=$(lsb_release --codename --short)
+      rm -rf pkg
+      rm -rf target/release/nginx-config-mod*
+      bulk with-version "${version}" cargo install --root=/work/pkg/usr --path=.
+      rm pkg/usr/.crates.toml
+      bulk pack --package-version="${version}+${codename}1"
+
+  _package-xenial: !Command
+    container: xenial
+    run: *package
+
+  _package-bionic: !Command
+    container: bionic
+    run: *package
+
+  packages: !Command
+    container: xenial
+    description: Build packages and repostories (mostly for CI)
+    prerequisites: [_package-trusty, _package-xenial, _package-bionic]
+    accepts_arguments: true
+    run: |
+      bulk repo-add --config bulk.yaml --repository-base dist/repos \
+        dist/nginx-config-mod-[0-9]*.deb "$@"
 
 containers:
 
-  ubuntu:
+  bionic:
     setup:
-    - !Ubuntu xenial
-    - !Install [ca-certificates, build-essential, vim]
+    - !Ubuntu bionic
+    - &pkgs !Install [ca-certificates, build-essential, vim,
+        # for releasing
+        git, lsb-release]
 
-    - !TarInstall
+    - &rust !TarInstall
       url: "https://static.rust-lang.org/dist/rust-1.24.1-x86_64-unknown-linux-gnu.tar.gz"
       script: "./install.sh --prefix=/usr \
                --components=rustc,rust-std-x86_64-unknown-linux-gnu,cargo"
     - &bulk !Tar
-      url: "https://github.com/tailhook/bulk/releases/download/v0.4.10/bulk-v0.4.10.tar.gz"
-      sha256: 481513f8a0306a9857d045497fb5b50b50a51e9ff748909ecf7d2bda1de275ab
+      url: "https://github.com/tailhook/bulk/releases/download/v0.4.11/bulk-v0.4.11.tar.gz"
+      sha256: b718bb8448e726690c94d98d004bf7575f7a429106ec26ad3faf11e0fd9a7978
       path: /
+    - !EnsureDir /cargo
+    volumes: &volumes
+      /cargo: !Persistent cargo
 
-    environ:
-      HOME: /work/target
+    environ: &environ
+      CARGO_HOME: /cargo
+      RUST_BACKTRACE: 1
       USER: pc
+
+  trusty:
+    setup:
+    - !Ubuntu trusty
+    - *pkgs
+    - *rust
+    - *bulk
+    - !EnsureDir /cargo
+    environ: *environ
+    volumes: *volumes
+
+  xenial:
+    setup:
+    - !Ubuntu xenial
+    - *pkgs
+    - *rust
+    - *bulk
+    - !EnsureDir /cargo
+    environ: *environ
+    volumes: *volumes

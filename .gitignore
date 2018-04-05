@@ -1,3 +1,5 @@
 /.vagga
 /target
 /tmp
+/dist
+/pkg

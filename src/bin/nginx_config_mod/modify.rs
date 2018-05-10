@@ -1,12 +1,14 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-use nginx_config_mod::{Config, EntryPoint};
-use nginx_config::parse_directives;
+use failure::Error;
+use failure::err_msg;
 use nginx_config::ast::{self, Listen, Value};
+use nginx_config::parse_directives;
 use nginx_config::visitors::{replace_vars, visit_mutable};
 
-use failure::Error;
+use nginx_config_mod::{Config, EntryPoint};
+use nginx_config_mod::checks;
 
 #[derive(StructOpt)]
 pub struct Modify {
@@ -27,6 +29,14 @@ pub struct Modify {
                 help="replace orig.host and all names starting with it \
                       to a dest.host (keeping prefix and port)")]
     proxy_pass_mapping: Vec<String>,
+
+    #[structopt(long="check-proxy-pass-hostnames", help="\
+        Also check that all hostnames in proxy_pass directives can be \
+        resolved. This is needed because nginx refuses to start if can't \
+        resolve IP addresses. \
+        Note: this might be slow. \
+        ")]
+    check_proxy_pass_hostnames: bool,
 
     #[structopt(long="listen", name="LISTEN",
                 help="replace all listen directives to this value",
@@ -112,6 +122,89 @@ fn proxy_subst<'x>(name: &'x str, anchor: &str) -> Option<(&'x str, &'x str)> {
 }
 
 
+fn server_names(cfg: &mut Config, names: &Vec<String>)
+    -> Result<(), Error>
+{
+    use nginx_config::ast::ServerName::*;
+    let mut snames = HashMap::new();
+    for item in names {
+        let mut pair = item.splitn(2, '=');
+        let orig = pair.next().expect("first item always exists");
+        if let Some(dest) = pair.next() {
+            snames.insert(orig, dest);
+        } else {
+            bail!("server name {:?} doesn't include substitution target \
+                   (format is `orig.name=dest.example.org`)");
+        }
+    }
+    visit_mutable(cfg.directives_mut(), |dir| {
+        match dir.item {
+            ast::Item::ServerName(ref mut names) => {
+                for name in names {
+                    match *name {
+                        Exact(ref mut n) | Suffix(ref mut n) |
+                        StarSuffix(ref mut n)
+                        => {
+                            for (orig, new) in &snames {
+                                *n = if let Some(prefix) = relative(n, orig) {
+                                    format!("{}{}", prefix, new)
+                                } else {
+                                    continue;
+                                }
+                            }
+                        }
+                        StarPrefix(_) => {}  // ingoring, warn? forbid?
+                        Regex(_) => {}  // ingoring, warn? forbid?
+                    }
+                }
+            }
+            _ => {}
+        }
+    });
+    Ok(())
+}
+
+fn proxy_pass_mapping(cfg: &mut Config, names: &Vec<String>)
+    -> Result<(), Error>
+{
+    let mut pnames = HashMap::new();
+    for item in names {
+        let mut pair = item.splitn(2, '=');
+        let orig = pair.next().expect("first item always exists");
+        if let Some(dest) = pair.next() {
+            pnames.insert(orig, dest);
+        } else {
+            bail!("proxy pass host {:?} doesn't include substitution \
+                target (format is `orig.host=dest.example.org`)");
+        }
+    }
+    let mut err = None;
+    visit_mutable(cfg.directives_mut(), |dir| {
+        match dir.item {
+            ast::Item::ProxyPass(ref mut value) => {
+                let mut s = value.to_string();
+                for (orig, new) in &pnames {
+                    s = if let Some((pre, suf)) = proxy_subst(&s, orig) {
+                        format!("{}{}{}", pre, new, suf)
+                    } else {
+                        continue;
+                    }
+                }
+                match parse_proxy(&s) {
+                    Ok(x) => *value = x,
+                    Err(e) => err = Some(e),
+                }
+            }
+            _ => {}
+        }
+    });
+    if let Some(e) = err {
+        return Err(e);
+    }
+    Ok(())
+}
+
+
 pub fn run(modify: Modify) -> Result<(), Error> {
     let mut cfg = Config::partial_file(EntryPoint::Main, &modify.file)?;
 
@@ -134,81 +227,20 @@ pub fn run(modify: Modify) -> Result<(), Error> {
         });
     }
 
-    // servernames
     if modify.server_name_mapping.len() > 0 {
-        use nginx_config::ast::ServerName::*;
-        let mut snames = HashMap::new();
-        for item in &modify.server_name_mapping {
-            let mut pair = item.splitn(2, '=');
-            let orig = pair.next().expect("first item always exists");
-            if let Some(dest) = pair.next() {
-                snames.insert(orig, dest);
-            } else {
-                bail!("server name {:?} doesn't include substitution target \
-                       (format is `orig.name=dest.example.org`)");
-            }
-        }
-        visit_mutable(cfg.directives_mut(), |dir| {
-            match dir.item {
-                ast::Item::ServerName(ref mut names) => {
-                    for name in names {
-                        match *name {
-                            Exact(ref mut n) | Suffix(ref mut n) |
-                            StarSuffix(ref mut n)
-                            => {
-                                for (orig, new) in &snames {
-                                    *n = if let Some(prefix) = relative(n, orig) {
-                                        format!("{}{}", prefix, new)
-                                    } else {
-                                        continue;
-                                    }
-                                }
-                            }
-                            StarPrefix(_) => {}  // ingoring, warn? forbid?
-                            Regex(_) => {}  // ingoring, warn? forbid?
-                        }
-                    }
-                }
-                _ => {}
-            }
-        });
+        server_names(&mut cfg, &modify.server_name_mapping)?;
     }
 
-    // proxy pass
     if modify.proxy_pass_mapping.len() > 0 {
-        let mut pnames = HashMap::new();
-        for item in &modify.proxy_pass_mapping {
-            let mut pair = item.splitn(2, '=');
-            let orig = pair.next().expect("first item always exists");
-            if let Some(dest) = pair.next() {
-                pnames.insert(orig, dest);
-            } else {
-                bail!("proxy pass host {:?} doesn't include substitution \
-                    target (format is `orig.host=dest.example.org`)");
+        proxy_pass_mapping(&mut cfg, &modify.proxy_pass_mapping)?;
+    }
+
+    if modify.check_proxy_pass_hostnames {
+        if let Err(errs) = checks::proxy_pass::check_hostnames(&cfg) {
+            for e in errs {
+                error!("{}", e);
             }
-        }
-        let mut err = None;
-        visit_mutable(cfg.directives_mut(), |dir| {
-            match dir.item {
-                ast::Item::ProxyPass(ref mut value) => {
-                    let mut s = value.to_string();
-                    for (orig, new) in &pnames {
-                        s = if let Some((pre, suf)) = proxy_subst(&s, orig) {
-                            format!("{}{}{}", pre, new, suf)
-                        } else {
-                            continue;
-                        }
-                    }
-                    match parse_proxy(&s) {
-                        Ok(x) => *value = x,
-                        Err(e) => err = Some(e),
-                    }
-                }
-                _ => {}
-            }
-        });
-        if let Some(e) = err {
-            return Err(e);
+            return Err(err_msg("failed to resolve some hostnames"));
         }
     }
 

@@ -9,10 +9,12 @@
 //! [Crate](https://crates.io/crates/nginx-config-mod)
 //!
 extern crate nginx_config;
+extern crate url;
 #[macro_use] extern crate failure;
 
 mod config;
 mod errors;
+pub mod checks;
 
 pub use errors::ReadError;
 pub use config::{Config, EntryPoint};

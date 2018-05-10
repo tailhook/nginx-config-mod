@@ -5,10 +5,12 @@ use std::fs::File;
 
 use errors::{ReadError, ReadEnum};
 use nginx_config;
+use nginx_config::visitors::DirectiveIter;
 use nginx_config::ast::{Directive, Main};
 
 
 pub struct Config {
+    #[allow(dead_code)]
     filename: Option<PathBuf>,
     ast: Ast,
 }
@@ -62,6 +64,15 @@ impl Config {
         match self.ast {
             Main(ref ast) => &ast.directives,
             Http(ref dirs) | Server(ref dirs) | Location(ref dirs) => dirs,
+        }
+    }
+    pub fn all_directives(&self) -> DirectiveIter {
+        use self::Ast::*;
+        match self.ast {
+            Main(ref ast) => ast.all_directives(),
+            Http(ref dirs) | Server(ref dirs) | Location(ref dirs) => {
+                DirectiveIter::depth_first(dirs)
+            },
         }
     }
     pub fn directives_mut(&mut self) -> &mut Vec<Directive> {

@@ -1,3 +1,4 @@
+extern crate regex;
 extern crate env_logger;
 extern crate nginx_config;
 extern crate nginx_config_mod;

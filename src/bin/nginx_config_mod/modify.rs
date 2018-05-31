@@ -1,11 +1,11 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-use failure::Error;
-use failure::err_msg;
+use failure::{Error, ResultExt, err_msg};
 use nginx_config::ast::{self, Listen, Value};
 use nginx_config::parse_directives;
 use nginx_config::visitors::{replace_vars, visit_mutable};
+use regex::Regex;
 
 use nginx_config_mod::{Config, EntryPoint};
 use nginx_config_mod::checks;
@@ -27,8 +27,16 @@ pub struct Modify {
 
     #[structopt(long="subst-proxy-pass-host", name="orig.host=dest.host",
                 help="replace orig.host and all names starting with it \
-                      to a dest.host (keeping prefix and port)")]
+                      to a dest.host (keeping prefix and port). \
+                      These replaces take place *before* regex replacement.")]
     proxy_pass_mapping: Vec<String>,
+
+    #[structopt(long="regex-subst-proxy-pass", name="REGEX=SUBST",
+                help="replace REGEX to a destination substitution. \
+                      Destination substitution may contain capture groups \
+                      '$0', '$1'...
+                      Regex replace takes place *after* host replacement")]
+    proxy_pass_regexes: Vec<String>,
 
     #[structopt(long="check-proxy-pass-hostnames", help="\
         Also check that all hostnames in proxy_pass directives can be \
@@ -164,6 +172,43 @@ fn server_names(cfg: &mut Config, names: &Vec<String>)
     Ok(())
 }
 
+fn proxy_pass_regexes(cfg: &mut Config, items: &Vec<String>)
+    -> Result<(), Error>
+{
+    let mut regexes = Vec::new();
+    for item in items {
+        let mut pair = item.splitn(2, '=');
+        let orig = pair.next().expect("first item always exists");
+        if let Some(dest) = pair.next() {
+            let regex = Regex::new(orig).context(orig.to_string())?;
+            regexes.push((regex, dest));
+        } else {
+            bail!("proxy pass regex {:?} doesn't include substitution \
+                target (format is `REGEX=SUBST`)");
+        }
+    }
+    let mut err = None;
+    visit_mutable(cfg.directives_mut(), |dir| {
+        match dir.item {
+            ast::Item::ProxyPass(ref mut value) => {
+                let mut s = value.to_string();
+                for (regex, repl) in &regexes {
+                    s = regex.replace(s.as_ref(), *repl).to_string();
+                }
+                match parse_proxy(&s) {
+                    Ok(x) => *value = x,
+                    Err(e) => err = Some(e),
+                }
+            }
+            _ => {}
+        }
+    });
+    if let Some(e) = err {
+        return Err(e);
+    }
+    Ok(())
+}
+
 fn proxy_pass_mapping(cfg: &mut Config, names: &Vec<String>)
     -> Result<(), Error>
 {
@@ -233,6 +278,10 @@ pub fn run(modify: Modify) -> Result<(), Error> {
 
     if modify.proxy_pass_mapping.len() > 0 {
         proxy_pass_mapping(&mut cfg, &modify.proxy_pass_mapping)?;
+    }
+
+    if modify.proxy_pass_regexes.len() > 0 {
+        proxy_pass_regexes(&mut cfg, &modify.proxy_pass_regexes)?;
     }
 
     if modify.check_proxy_pass_hostnames {

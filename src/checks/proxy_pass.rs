@@ -16,8 +16,14 @@ pub enum Error {
     __Nonexhaustive,
 }
 
-
 pub fn check_hostnames(cfg: &Config)
+    -> Result<(), Vec<Error>>
+{
+    check_selected_hostnames(cfg, |_| true)
+}
+
+pub fn check_selected_hostnames(cfg: &Config,
+    mut do_check: impl FnMut(&str) -> bool)
     -> Result<(), Vec<Error>>
 {
     use self::Error::*;
@@ -35,6 +41,9 @@ pub fn check_hostnames(cfg: &Config)
                 };
                 match url.host() {
                     Some(Host::Domain(val)) => {
+                        if !do_check(val) {
+                            continue;
+                        }
                         match (val, url.port().unwrap_or(80)).to_socket_addrs()
                         {
                             Ok(_) => {}

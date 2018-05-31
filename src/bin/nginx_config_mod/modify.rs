@@ -46,6 +46,15 @@ pub struct Modify {
         ")]
     check_proxy_pass_hostnames: bool,
 
+    #[structopt(long="regex-proxy-pass-exclude", help="\
+        Exclude following hostnames for the check-proxy-pass-hostnames. \
+        This regex should match all upstreams, because it's usually \
+        useless to resolve them. \
+        (Note: currently, we don't check upstreams present in config, \
+        but we may add the feature later). \
+        ")]
+    proxy_pass_exclude: Vec<String>,
+
     #[structopt(long="listen", name="LISTEN",
                 help="replace all listen directives to this value",
                 parse(try_from_str="parse_listen"))]
@@ -285,7 +294,13 @@ pub fn run(modify: Modify) -> Result<(), Error> {
     }
 
     if modify.check_proxy_pass_hostnames {
-        if let Err(errs) = checks::proxy_pass::check_hostnames(&cfg) {
+        let regexes = modify.proxy_pass_exclude.iter()
+            .map(|r| Regex::new(&r))
+            .collect::<Result<Vec<_>, _>>()?;
+        let result = checks::proxy_pass::check_selected_hostnames(&cfg, |dom| {
+            !regexes.iter().any(|x| x.is_match(dom))
+        });
+        if let Err(errs) = result {
             for e in errs {
                 error!("{}", e);
             }

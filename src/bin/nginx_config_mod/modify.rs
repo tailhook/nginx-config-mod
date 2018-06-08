@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 
 use failure::{Error, ResultExt, err_msg};
-use nginx_config::ast::{self, Listen, Value, Directive};
+use nginx_config::ast::{self, Listen, Value, Directive, Item};
 use nginx_config::{parse_directives, Pos};
 use nginx_config::visitors::{replace_vars, visit_mutable};
 use regex::Regex;
@@ -61,19 +61,50 @@ pub struct Modify {
                 be present in each block",
                 parse(try_from_str="parse_listen"))]
     listen: Vec<Listen>,
+
+    #[structopt(long="replace-by-name", name="DIR=VALUE", help="\
+        Replace any occurrence of directve named DIR with another directive, \
+        specified in VALUE. For example ``expires=add_header Expires never``. \
+        VALUE must be a single and fully valid directive, excluding \
+        semicolon. This replacement works *after* all other replacements \
+        took place. Only one rule is applied to each directive.",
+        parse(try_from_str="parse_replacement"))]
+    replace_by_name: Vec<(String, Item)>,
 }
 
 fn parse_listen(s: &str) -> Result<Listen, Error> {
     let text = format!("listen {};", s);
     let mut dirs = parse_directives(&text)?;
     if dirs.len() > 1 {
-        bail!("Only single listen directive may be specified \
-               (consider removing semicolon from argument)");
+        bail!("unexpected semicolon");
     }
     match dirs.pop().map(|d| d.item) {
         Some(ast::Item::Listen(lst)) => Ok(lst),
         _ => bail!("Internal error when parsing listen directive"),
     }
+}
+
+fn parse_replacement(s: &str) -> Result<(String, Item), Error> {
+    let mut pair = s.splitn(2, "=");
+    let name = pair.next().unwrap();
+    if name.len() == 0 {
+        bail!("directive name must not be empty");
+    }
+    let dirs = match pair.next() {
+        Some(x) => {
+            let text = format!("{};", x);
+            parse_directives(&text)?
+        }
+        None => bail!("no replacement directive specified"),
+    };
+    if dirs.len() == 0 {
+        bail!("no replacement directive specified");
+    }
+    if dirs.len() > 1 {
+        bail!("Only single replacement directive may be specified \
+               (consider removing semicolon from argument)");
+    }
+    Ok((name.to_string(), {dirs}.pop().unwrap().item))
 }
 
 // TODO(tailhook) temporary, until we expose Value::parse
@@ -320,6 +351,16 @@ pub fn run(modify: Modify) -> Result<(), Error> {
             }
             return Err(err_msg("failed to resolve some hostnames"));
         }
+    }
+    if modify.replace_by_name.len() > 0 {
+        visit_mutable(cfg.directives_mut(), |dir| {
+            for (name, value) in &modify.replace_by_name {
+                if dir.item.directive_name() == name {
+                    dir.item = value.clone();
+                    break;
+                }
+            }
+        })
     }
 
     print!("{}", cfg);

@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{PathBuf, Path};
 
 use failure::{Error, ResultExt, err_msg};
 use nginx_config::ast::{self, Listen, Value, Directive, Item};
@@ -54,6 +54,13 @@ pub struct Modify {
         but we may add the feature later). \
         ")]
     proxy_pass_exclude: Vec<String>,
+
+    #[structopt(long="allow-includes", help="\
+        Add a path prefix to a list of allowed include directive prefixes. \
+        Note: these includes aren't read and checked so may possibly \
+        contain disallowed things if not checked on its own.",
+        parse(from_os_str))]
+    allow_includes: Vec<PathBuf>,
 
     #[structopt(long="listen", name="LISTEN",
                 help="replace all listen directives to this value. \
@@ -338,6 +345,31 @@ pub fn run(modify: Modify) -> Result<(), Error> {
         proxy_pass_regexes(&mut cfg, &modify.proxy_pass_regexes)?;
     }
 
+    for dir in cfg.all_directives() {
+        match &dir.item {
+            Item::Include(path) => {
+                let path = path.to_string();
+                let path = Path::new(&path);
+                if !modify.allow_includes.iter().any(|p| path.starts_with(p)) {
+                    bail!("invalid include path {:?}, allowed: {:?}",
+                        path, &modify.allow_includes);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    if modify.replace_by_name.len() > 0 {
+        visit_mutable(cfg.directives_mut(), |dir| {
+            for (name, value) in &modify.replace_by_name {
+                if dir.item.directive_name() == name {
+                    dir.item = value.clone();
+                    break;
+                }
+            }
+        })
+    }
+
     if modify.check_proxy_pass_hostnames {
         let regexes = modify.proxy_pass_exclude.iter()
             .map(|r| Regex::new(&r))
@@ -351,16 +383,6 @@ pub fn run(modify: Modify) -> Result<(), Error> {
             }
             return Err(err_msg("failed to resolve some hostnames"));
         }
-    }
-    if modify.replace_by_name.len() > 0 {
-        visit_mutable(cfg.directives_mut(), |dir| {
-            for (name, value) in &modify.replace_by_name {
-                if dir.item.directive_name() == name {
-                    dir.item = value.clone();
-                    break;
-                }
-            }
-        })
     }
 
     print!("{}", cfg);

@@ -4,6 +4,7 @@ extern crate nginx_config;
 extern crate nginx_config_mod;
 #[macro_use] extern crate failure;
 #[macro_use] extern crate log;
+#[macro_use] extern crate matches;
 #[macro_use] extern crate structopt;
 
 mod modify;

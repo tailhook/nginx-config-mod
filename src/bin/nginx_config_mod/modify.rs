@@ -2,8 +2,8 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 
 use failure::{Error, ResultExt, err_msg};
-use nginx_config::ast::{self, Listen, Value};
-use nginx_config::parse_directives;
+use nginx_config::ast::{self, Listen, Value, Directive};
+use nginx_config::{parse_directives, Pos};
 use nginx_config::visitors::{replace_vars, visit_mutable};
 use regex::Regex;
 
@@ -56,9 +56,11 @@ pub struct Modify {
     proxy_pass_exclude: Vec<String>,
 
     #[structopt(long="listen", name="LISTEN",
-                help="replace all listen directives to this value",
+                help="replace all listen directives to this value. \
+                If used multiple times. This number of listen directives will \
+                be present in each block",
                 parse(try_from_str="parse_listen"))]
-    listen: Option<Listen>,
+    listen: Vec<Listen>,
 }
 
 fn parse_listen(s: &str) -> Result<Listen, Error> {
@@ -258,6 +260,18 @@ fn proxy_pass_mapping(cfg: &mut Config, names: &Vec<String>)
     Ok(())
 }
 
+fn replace_listen(dirs: &mut Vec<Directive>, lst: &Vec<Listen>) {
+    let ref is_listen = |x: &Directive| matches!(x.item, ast::Item::Listen(..));
+    if let Some(pos) = dirs.iter().position(is_listen) {
+        dirs.retain(|x| !is_listen(x));
+        for (idx, item) in lst.iter().enumerate() {
+            dirs.insert(pos+idx, Directive {
+                position: Pos { line: 0, column: 0 },
+                item: ast::Item::Listen(item.clone()),
+            });
+        }
+    }
+}
 
 pub fn run(modify: Modify) -> Result<(), Error> {
     let mut cfg = Config::partial_file(EntryPoint::Main, &modify.file)?;
@@ -272,11 +286,11 @@ pub fn run(modify: Modify) -> Result<(), Error> {
     replace_vars(cfg.directives_mut(), |name| vars.get(name).map(|x| *x));
 
     // listen
-    if let Some(new_listen) = modify.listen {
+    if modify.listen.len() > 0 {
+        replace_listen(cfg.directives_mut(), &modify.listen);
         visit_mutable(cfg.directives_mut(), |dir| {
-            match dir.item {
-                ast::Item::Listen(ref mut lst) => *lst = new_listen.clone(),
-                _ => {}
+            if let Some(children) = dir.item.children_mut() {
+                replace_listen(children, &modify.listen);
             }
         });
     }

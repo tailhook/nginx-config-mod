@@ -1,7 +1,10 @@
 use std::collections::HashMap;
+use std::mem;
 use std::path::{PathBuf, Path};
+use std::fs::read_to_string;
 
 use failure::{Error, ResultExt, err_msg};
+use nginx_config;
 use nginx_config::ast::{self, Listen, Value, Directive, Item};
 use nginx_config::{parse_directives, Pos};
 use nginx_config::visitors::{replace_vars, visit_mutable};
@@ -54,6 +57,13 @@ pub struct Modify {
         but we may add the feature later). \
         ")]
     proxy_pass_exclude: Vec<String>,
+
+    #[structopt(long="expand-local-includes", help="\
+        Expand non-absolute includes to their contents. \
+        Include path is treated relative to the configuration file path. \
+        Including works before all other directives so included contents is \
+        processed normally.")]
+    expand_local_includes: bool,
 
     #[structopt(long="allow-includes", help="\
         Add a path prefix to a list of allowed include directive prefixes. \
@@ -311,8 +321,53 @@ fn replace_listen(dirs: &mut Vec<Directive>, lst: &Vec<Listen>) {
     }
 }
 
+fn expand_local_includes(dest: &mut Vec<Directive>, path: &Path)
+    -> Result<(), Error>
+{
+    use nginx_config::ast::Item::Include;
+
+    let orig_len = dest.len();
+    let source = mem::replace(dest, Vec::with_capacity(orig_len));
+    for mut dir in source {
+        let inc_path = match dir.item {
+            Include(ref inc_path) => {
+                let inc_path = inc_path.to_string();
+                let inc_path = Path::new(&inc_path);
+                if !inc_path.is_absolute() {
+                    Some(path.parent()
+                        .expect("file path always has parent")
+                        .join(inc_path))
+                } else {
+                    None
+                }
+            }
+            _ => {
+                if let Some(list) = dir.item.children_mut() {
+                    expand_local_includes(list, path)?;
+                }
+                None
+            }
+        };
+        let inc_path = if let Some(inc_path) = inc_path  {
+            inc_path
+        } else {
+            dest.push(dir);
+            continue;
+        };
+        let contents = read_to_string(&inc_path)
+            .map_err(|e| format_err!("error reading {:?}: {}", inc_path, e))?;
+        let inc_dirs = nginx_config::parse_directives(&contents)?;
+        dest.extend(inc_dirs);
+    }
+    Ok(())
+}
+
 pub fn run(modify: Modify) -> Result<(), Error> {
     let mut cfg = Config::partial_file(EntryPoint::Main, &modify.file)?;
+
+    if modify.expand_local_includes {
+        expand_local_includes(cfg.directives_mut(), &modify.file)?;
+    }
 
     // vars
     let mut vars = HashMap::new();

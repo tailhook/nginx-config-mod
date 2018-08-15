@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::mem;
 use std::path::{PathBuf, Path};
 use std::fs::read_to_string;
+use std::str::FromStr;
 
 use failure::{Error, ResultExt, err_msg};
 use nginx_config;
@@ -40,6 +41,21 @@ pub struct Modify {
                       '$0', '$1'...
                       Regex replace takes place *after* host replacement")]
     proxy_pass_regexes: Vec<String>,
+
+    #[structopt(long="regex-subst-if", name="IF_REGEX=SUBST",
+                help="replace REGEX in 'if' conditions (only literal value, \
+                      and only in `=` or `!=` conditions). \
+                      Destination substitution may contain capture groups \
+                      '$0', '$1'... ")]
+    if_regexes: Vec<String>,
+
+    #[structopt(long="regex-subst-rewrite-host", name="HOST_REGEX=SUBST",
+                help="replace REGEX in host for rewrite directives. \
+                      This work only for `http://host` or `https://host`,
+                      or `$scheme://host` rewrites not local ones.
+                      Destination substitution may contain capture groups \
+                      '$0', '$1'... ")]
+    rewrite_host_regexes: Vec<String>,
 
     #[structopt(long="check-proxy-pass-hostnames", help="\
         Also check that all hostnames in proxy_pass directives can be \
@@ -268,6 +284,95 @@ fn proxy_pass_regexes(cfg: &mut Config, items: &Vec<String>)
     Ok(())
 }
 
+fn if_regexes(cfg: &mut Config, items: &Vec<String>)
+    -> Result<(), Error>
+{
+    use nginx_config::ast::IfCondition::*;
+    let mut regexes = Vec::new();
+    for item in items {
+        let mut pair = item.splitn(2, '=');
+        let orig = pair.next().expect("first item always exists");
+        if let Some(dest) = pair.next() {
+            let regex = Regex::new(orig).context(orig.to_string())?;
+            regexes.push((regex, dest));
+        } else {
+            bail!("if regex {:?} doesn't include substitution \
+                target (format is `REGEX=SUBST`)");
+        }
+    }
+    visit_mutable(cfg.directives_mut(), |dir| {
+        match dir.item {
+            | ast::Item::If(ast::If { condition: Eq(_, ref mut value), .. })
+            | ast::Item::If(ast::If { condition: Neq(_, ref mut value), .. })
+            => {
+                let mut s = value.to_string();
+                for (regex, repl) in &regexes {
+                    s = regex.replace(s.as_ref(), *repl).to_string();
+                }
+                *value = s;
+            }
+            _ => {}
+        }
+    });
+    Ok(())
+}
+
+fn rewrite_host_regexes(cfg: &mut Config, items: &Vec<String>)
+    -> Result<(), Error>
+{
+    let mut regexes = Vec::new();
+    for item in items {
+        let mut pair = item.splitn(2, '=');
+        let orig = pair.next().expect("first item always exists");
+        if let Some(dest) = pair.next() {
+            let regex = Regex::new(orig).context(orig.to_string())?;
+            regexes.push((regex, dest));
+        } else {
+            bail!("rewrite host regex {:?} doesn't include substitution \
+                target (format is `REGEX=SUBST`)");
+        }
+    }
+    let mut err = None;
+    visit_mutable(cfg.directives_mut(), |dir| {
+        match dir.item {
+            | ast::Item::Rewrite(ast::Rewrite { ref mut replacement, .. })
+            => {
+                let mut s = replacement.to_string();
+                if !(s.starts_with("http://") ||
+                     s.starts_with("https://") ||
+                     s.starts_with("$scheme://"))
+                {
+                    return;
+                }
+                let (prefix, tmp) = s.split_at(s.find('/').unwrap() + 2);
+                let (host, suffix) = if let Some(end) = tmp.find('/') {
+                    tmp.split_at(end)
+                } else {
+                    (tmp, "")
+                };
+                let mut host = host.to_string();
+                for (regex, repl) in &regexes {
+                    host = regex.replace(host.as_ref(), *repl).to_string();
+                }
+                let mut s = String::with_capacity(
+                    prefix.len() + suffix.len() + host.len());
+                s.push_str(prefix);
+                s.push_str(&host);
+                s.push_str(suffix);
+                match Value::from_str(&s) {
+                    Ok(v) => *replacement = v,
+                    Err(e) => err = Some(e),
+                }
+            }
+            _ => {}
+        }
+    });
+    if let Some(e) = err {
+        return Err(err_msg(e));
+    }
+    Ok(())
+}
+
 fn proxy_pass_mapping(cfg: &mut Config, names: &Vec<String>)
     -> Result<(), Error>
 {
@@ -398,6 +503,12 @@ pub fn run(modify: Modify) -> Result<(), Error> {
 
     if modify.proxy_pass_regexes.len() > 0 {
         proxy_pass_regexes(&mut cfg, &modify.proxy_pass_regexes)?;
+    }
+    if modify.if_regexes.len() > 0 {
+        if_regexes(&mut cfg, &modify.if_regexes)?;
+    }
+    if modify.rewrite_host_regexes.len() > 0 {
+        rewrite_host_regexes(&mut cfg, &modify.rewrite_host_regexes)?;
     }
 
     for dir in cfg.all_directives() {

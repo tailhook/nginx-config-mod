@@ -198,7 +198,7 @@ dependencies = [
 
 [[package]]
 name = "nginx-config-mod"
-version = "0.2.7"
+version = "0.2.8"
 dependencies = [
  "env_logger 0.5.12 (registry+https://github.com/rust-lang/crates.io-index)",
  "failure 0.1.2 (registry+https://github.com/rust-lang/crates.io-index)",

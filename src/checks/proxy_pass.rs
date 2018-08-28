@@ -32,10 +32,15 @@ pub fn check_selected_hostnames(cfg: &Config,
         match dir.item {
             ast::Item::ProxyPass(ref texturl) => {
                 let texturl = texturl.to_string();
-                let url = match Url::parse(&texturl) {
+                let url_part = if let Some(off) = texturl.find("$request_uri") {
+                    &texturl[..off]
+                } else {
+                    &texturl
+                };
+                let url = match Url::parse(&url_part) {
                     Ok(url) => url,
                     Err(e) => {
-                        errors.push(InvalidUrl(texturl, e));
+                        errors.push(InvalidUrl(texturl.clone(), e));
                         continue;
                     }
                 };
@@ -49,7 +54,7 @@ pub fn check_selected_hostnames(cfg: &Config,
                             Ok(_) => {}
                             Err(e) => {
                                 errors.push(Resolve(val.to_string(),
-                                    texturl, e));
+                                    texturl.clone(), e));
                             }
                         }
                     }
